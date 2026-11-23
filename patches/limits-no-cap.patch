@@ -1,0 +1,60 @@
+diff --git a/server/channels/app/limits.go b/server/channels/app/limits.go
+index 45448e4..79b0c71 100644
+--- a/server/channels/app/limits.go
++++ b/server/channels/app/limits.go
+@@ -10,8 +10,9 @@ import (
+ )
+ 
+ const (
+-	maxUsersLimit     = 200
+-	maxUsersHardLimit = 250
++	// Patched: the free-edition seat caps are raised far beyond any real deployment.
++	maxUsersLimit     = 5_000_000
++	maxUsersHardLimit = 11_000_000
+ )
+ 
+ // GetServerLimits returns the server's seat/post-history limits. The license-derived
+@@ -43,9 +44,9 @@ func (a *App) GetServerLimits(includeUserCounts bool) (*model.ServerLimits, *mod
+ 		limits.MaxUsersHardLimit = licenseUserLimit + int64(extraUsers)
+ 	}
+ 
+-	// Check if license has post history limits and get the calculated timestamp
+-	if license != nil && license.Limits != nil && license.Limits.PostHistory > 0 {
+-		limits.PostHistoryLimit = license.Limits.PostHistory
++	// Patched: the licence-derived message-history cap is never applied.
++	if limit := a.GetPostHistoryLimit(); limit > 0 {
++		limits.PostHistoryLimit = limit
+ 		// Get the calculated timestamp of the last accessible post
+ 		lastAccessibleTime, appErr := a.GetLastAccessiblePostTime()
+ 		if appErr != nil {
+@@ -102,13 +103,8 @@ func (a *App) shouldTrackSingleChannelGuests() bool {
+ }
+ 
+ func (a *App) GetPostHistoryLimit() int64 {
+-	license := a.License()
+-	if license == nil || license.Limits == nil || license.Limits.PostHistory == 0 {
+-		// No limits applicable
+-		return 0
+-	}
+-
+-	return license.Limits.PostHistory
++	// Patched: message history is never truncated, even under an Entry licence.
++	return 0
+ }
+ 
+ func (a *App) isAtUserLimit() (bool, *model.AppError) {
+diff --git a/server/channels/app/post.go b/server/channels/app/post.go
+index 9a1191d..0d5dcd6 100644
+--- a/server/channels/app/post.go
++++ b/server/channels/app/post.go
+@@ -2433,9 +2433,7 @@ func (a *App) convertUserNameToUserIds(rctx request.CTX, usernames []string) []s
+ // GetLastAccessiblePostTime returns CreateAt time(from cache) of the last accessible post as per the license limit
+ func (a *App) GetLastAccessiblePostTime() (int64, *model.AppError) {
+ 	// Only calculate the last accessible post time when there are actual post history limits
+-	license := a.Srv().License()
+-
+-	if license == nil || license.Limits == nil || license.Limits.PostHistory == 0 {
++	if a.GetPostHistoryLimit() == 0 {
+ 		return 0, nil
+ 	}
+ 

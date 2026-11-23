@@ -1,0 +1,307 @@
+name: Upstream Release Sync
+
+# Tracks final releases (vX.Y.Z only, never -rc/-beta) of mattermost/mattermost
+# and rebuilds this fork on top of each one.
+#
+#   master          mirror of upstream; only ever merged forward, never patched,
+#                   so the next upstream release keeps merging cleanly
+#   release/<tag>   <tag> + patches/ + the OIDC patch from toowoxx/mattermost-oidc
+#   mm-<tag>        tag on the patched release commit
+#
+# If a patch no longer applies (upstream touched the same code) or the patched
+# tree stops compiling, the pi coding agent repairs the patch on the release
+# branch before that branch and tag are published. The agent runs through a
+# Cloudflare AI Gateway, so every model call is centralised there.
+#
+# Required repository configuration (Settings -> Secrets and variables -> Actions):
+#   vars.CF_ACCOUNT_ID     Cloudflare account id
+#   vars.CF_GATEWAY_ID     AI Gateway id
+#   vars.PI_MODEL          model as {provider}/{model}, e.g. openai/gpt-5.4
+#   secrets.CF_AIG_TOKEN   token that gateway accepts (provider key, or a
+#                          Cloudflare API token for BYOK / unified billing)
+#
+# Without that configuration the sync still runs; it only fails when a patch
+# genuinely needs repairing, and says so in the job log.
+
+on:
+  schedule:
+    # Daily, off the hour so we are not in the release rush.
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream tag to sync (default: newest final vX.Y.Z tag)'
+        required: false
+        type: string
+      repair:
+        description: 'Force the agent repair pass even if the patches apply cleanly'
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: upstream-release-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: mattermost/mattermost
+  OIDC_REPO_URL: https://github.com/toowoxx/mattermost-oidc.git
+
+jobs:
+  sync:
+    name: Sync upstream release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: sync/checkout-master
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: sync/resolve-upstream-tag
+        id: tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --force --prune --no-tags upstream '+refs/tags/v*:refs/tags/v*'
+
+          # Final releases only: vX.Y.Z. This drops -rc/-beta tags and the
+          # @mattermost/types@... module tags.
+          mapfile -t candidates < <(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            echo "::error::No final upstream tags found"
+            exit 1
+          fi
+
+          if [ -n "${REQUESTED_TAG}" ]; then
+            if ! printf '%s\n' "${candidates[@]}" | grep -Fxq "${REQUESTED_TAG}"; then
+              echo "::error::${REQUESTED_TAG} is not a final upstream tag"
+              exit 1
+            fi
+            tag="${REQUESTED_TAG}"
+          else
+            tag="${candidates[-1]}"
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Resolved upstream tag ${tag} (latest final tag: ${candidates[-1]})"
+
+      - name: sync/already-synced
+        id: check
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/mm-${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.tag.outputs.tag }} already built and tagged, nothing to do"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: sync/update-master
+        # master tracks upstream master, not the release tag: release branches are
+        # cherry-picked, so merging a tag into master conflicts on hundreds of files.
+        # This runs even when the release tag needs no rebuild, so the fork never
+        # drifts from upstream between releases.
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags upstream 'refs/heads/master:refs/remotes/upstream/master'
+          git switch --force-create master origin/master
+          git merge --no-edit -m 'Merge upstream master' refs/remotes/upstream/master
+          git push origin master
+
+      - name: sync/apply-patches
+        id: patch
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -uo pipefail
+          tag='${{ steps.tag.outputs.tag }}'
+
+          # The release branch starts from the tag, which has no patches/ dir.
+          mkdir -p "$RUNNER_TEMP/patches"
+          cp patches/*.patch "$RUNNER_TEMP/patches/"
+
+          git config user.name 'upstream-sync[bot]'
+          git config user.email 'upstream-sync@users.noreply.github.com'
+          git switch --force-create "release/${tag}" "refs/tags/${tag}"
+          git checkout master -- patches
+
+          status=0
+          if ! git apply -v "$RUNNER_TEMP/patches/limits-no-cap.patch"; then
+            echo "::warning::patches/limits-no-cap.patch does not apply to ${tag}"
+            status=1
+          fi
+
+          if [ ! -d ../mattermost-oidc ]; then
+            # go.mod replaces github.com/toowoxx/mattermost-oidc with
+            # ../../mattermost-oidc relative to server/, so this must be a sibling
+            # of the checkout.
+            git clone --depth 1 "${OIDC_REPO_URL}" ../mattermost-oidc
+          fi
+          oidc_patch="../mattermost-oidc/patches/mattermost-${tag}.patch"
+          if [ -f "${oidc_patch}" ]; then
+            if ! git apply -v "${oidc_patch}"; then
+              echo "::warning::OIDC patch for ${tag} does not apply"
+              status=1
+            fi
+          else
+            echo "::warning::toowoxx/mattermost-oidc publishes no patch for ${tag}"
+            status=1
+          fi
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Apply OIDC SSO and no-cap patches on ${tag}"
+          fi
+
+          echo "needs_repair=${status}" >> "$GITHUB_OUTPUT"
+
+      - name: sync/setup-go
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: server/.go-version
+          cache-dependency-path: server/go.sum
+
+      - name: sync/build
+        id: build
+        if: steps.check.outputs.skip == 'false'
+        continue-on-error: true
+        env:
+          GOPRIVATE: github.com/mattermost/*
+        run: |
+          cd server
+          make build-linux-amd64
+
+      - name: sync/agent-needed
+        id: agent
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          required='false'
+          if [ '${{ steps.patch.outputs.needs_repair }}' = 'true' ] ||
+             [ '${{ steps.build.outcome }}' = 'failure' ] ||
+             [ '${{ inputs.repair }}' = 'true' ]; then
+            required='true'
+          fi
+          echo "required=${required}" >> "$GITHUB_OUTPUT"
+          echo "agent repair required=${required}"
+
+      - name: sync/setup-node-for-agent
+        if: steps.agent.outputs.required == 'true' && vars.CF_ACCOUNT_ID != '' && vars.CF_GATEWAY_ID != '' && vars.PI_MODEL != ''
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: sync/agent-repair
+        id: pi
+        if: steps.agent.outputs.required == 'true' && vars.CF_ACCOUNT_ID != '' && vars.CF_GATEWAY_ID != '' && vars.PI_MODEL != ''
+        uses: shaftoe/pi-coding-agent-action@c9c89dcabbf612ab2a528acfad8785a8075e22f3 # v2.30.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          provider: openai
+          model: ${{ vars.PI_MODEL }}
+          base_url: https://gateway.ai.cloudflare.com/v1/${{ vars.CF_ACCOUNT_ID }}/${{ vars.CF_GATEWAY_ID }}/compat
+          token: ${{ secrets.CF_AIG_TOKEN }}
+          thinking_level: medium
+          prompt: |
+            This checkout is mattermost/mattermost at final release ${{ steps.tag.outputs.tag }},
+            with our patches applied on branch release/${{ steps.tag.outputs.tag }}. A patch
+            stopped applying or the patched tree no longer compiles, so the patches have to be
+            repaired against the new upstream code. Do not revert the behaviour they add.
+
+            Two patches must end up applied to the working tree:
+
+            1. patches/limits-no-cap.patch
+               - server/channels/app/limits.go: maxUsersLimit/maxUsersHardLimit raised so the
+                 unlicensed seat cap is effectively gone.
+               - server/channels/app/limits.go: App.GetPostHistoryLimit() returns 0, and
+                 GetServerLimits derives its PostHistoryLimit from that function.
+               - server/channels/app/post.go: App.GetLastAccessiblePostTime() returns 0 when
+                 App.GetPostHistoryLimit() is 0.
+               Intent: a self-hosted server never truncates message history and never caps seats,
+               even when an Entry licence is installed.
+
+            2. The OIDC patch from toowoxx/mattermost-oidc for ${{ steps.tag.outputs.tag }}
+               (../mattermost-oidc/patches/mattermost-${{ steps.tag.outputs.tag }}.patch when it
+               exists). It adds the go.mod require/replace for the module, the blank openid
+               import in server/cmd/mattermost/main.go, drops the email-account guard in
+               server/channels/app/user.go, and stops the licence gate from hiding
+               EnableSignUpWithOpenId/OpenIdButtonText/OpenIdButtonColor in server/config/client.go.
+               If that project has no patch for this release yet, port the newest patch in
+               ../mattermost-oidc/patches/ forward to this tree.
+
+            Rules:
+            - Keep the changes minimal and in the same places the patches already touch.
+            - Rewrite patches/limits-no-cap.patch so it applies to a pristine
+              ${{ steps.tag.outputs.tag }} checkout again (`git apply --check` must pass).
+            - Do not push, do not open a pull request, do not commit, and do not touch
+              .github/workflows. Leave the result in the working tree; the workflow commits it.
+            - Verify the tree compiles before you finish:
+              cd server && make setup-go-work && GOPRIVATE='github.com/mattermost/*' go build ./cmd/mattermost
+            - In your final message list the files you changed and why.
+
+      - name: sync/commit-repairs
+        if: steps.agent.outputs.required == 'true' && steps.pi.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Agent changed nothing"
+          else
+            git commit -m "Repair patches for ${{ steps.tag.outputs.tag }}"
+          fi
+
+      - name: sync/rebuild-after-repair
+        id: rebuild
+        if: steps.agent.outputs.required == 'true' && steps.pi.outcome == 'success'
+        env:
+          GOPRIVATE: github.com/mattermost/*
+        run: |
+          cd server
+          make build-linux-amd64
+
+      - name: sync/agent-not-configured
+        if: steps.agent.outputs.required == 'true' && (vars.CF_ACCOUNT_ID == '' || vars.CF_GATEWAY_ID == '' || vars.PI_MODEL == '')
+        run: |
+          echo "::error::Patches need repairing but the Cloudflare AI Gateway is not configured."
+          echo "::error::Set vars.CF_ACCOUNT_ID, vars.CF_GATEWAY_ID, vars.PI_MODEL and secrets.CF_AIG_TOKEN."
+          exit 1
+
+      - name: sync/publish-release-branch
+        if: (steps.build.outcome == 'success' || steps.rebuild.outcome == 'success') && steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          tag='${{ steps.tag.outputs.tag }}'
+          git push --force origin "release/${tag}"
+          git tag --force "mm-${tag}"
+          git push --force origin "refs/tags/mm-${tag}"
+
+      - name: sync/report-failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG:-unknown-tag}"
+          title="Upstream sync failed for ${tag}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          if [ "$(gh issue list --state open --search "in:title ${title}" --json number --jq 'length')" != "0" ]; then
+            echo "An open issue already tracks this failure"
+            exit 0
+          fi
+
+          body=$(printf 'The automatic sync of upstream %s did not finish.\n\nRun: %s\n\nCheck the run log. If the patched tree does not build, push a fixed release/%s branch, or re-run once the Cloudflare AI Gateway repair step is configured.\n' "${tag}" "${run_url}" "${tag}")
+          gh issue create --title "${title}" --body "${body}"
