@@ -8,6 +8,12 @@ name: Upstream Release Sync
 #   release/<tag>   <tag> + patches/ + the OIDC patch from toowoxx/mattermost-oidc
 #   mm-<tag>        tag on the patched release commit
 #
+# A green build also publishes the runnable image
+# ghcr.io/<owner>/mattermost:mm-<tag>. It is built from the official release
+# tarball for that tag (webapp assets, mmctl, plugins) with this repository's
+# patched server binary swapped in, so the UI and the server are always the
+# same version.
+#
 # If a patch no longer applies (upstream touched the same code) or the patched
 # tree stops compiling, the pi coding agent repairs the patch on the release
 # branch before that branch and tag are published. The agent runs through a
@@ -57,6 +63,7 @@ jobs:
     permissions:
       contents: write
       issues: write
+      packages: write
     steps:
       - name: sync/checkout-master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -270,6 +277,44 @@ jobs:
         run: |
           cd server
           make build-linux-amd64
+
+      - name: sync/build-image
+        if: steps.build.outcome == 'success' || steps.rebuild.outcome == 'success'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/mattermost"
+
+          # Official tarball for this exact tag: webapp assets, mmctl and the
+          # bundled plugins. Only the server binary comes from this build.
+          docker build \
+            --build-arg "MM_PACKAGE=https://releases.mattermost.com/${version}/mattermost-enterprise-${version}-linux-amd64.tar.gz" \
+            -t "${image}:mm-${TAG}-base" \
+            --file server/build/Dockerfile server/build
+
+          binary="$(find server/bin -type f -name mattermost -print -quit)"
+          if [ -z "$binary" ]; then
+            echo "::error::patched mattermost binary not found under server/bin"
+            exit 1
+          fi
+          echo "using $binary ($(du -h "$binary" | cut -f1))"
+
+          ctx="$(mktemp -d)"
+          install -D -m 0755 "$binary" "${ctx}/bin/mattermost"
+          printf 'FROM %s:mm-%s-base\nCOPY --chown=2000:2000 bin/mattermost /mattermost/bin/mattermost\n' \
+            "$image" "$TAG" > "${ctx}/Dockerfile"
+          docker build -t "${image}:mm-${TAG}" --file "${ctx}/Dockerfile" "$ctx"
+
+          # Prove the image starts and reports the patched binary before pushing.
+          docker run --rm --entrypoint /mattermost/bin/mattermost "${image}:mm-${TAG}" version
+
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "${image}:mm-${TAG}"
+          echo "pushed ${image}:mm-${TAG}"
 
       - name: sync/agent-not-configured
         if: steps.agent.outputs.required == 'true' && (vars.CF_ACCOUNT_ID == '' || vars.CF_GATEWAY_ID == '' || vars.PI_MODEL == '')
