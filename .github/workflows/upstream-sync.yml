@@ -352,7 +352,7 @@ jobs:
             code="$(curl -sS -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H 'Accept: application/vnd.github+json' \
-              "${api}/ref/${short}") "
+              "${api}/ref/${short}")"
             if [ "${code}" = "200" ]; then
               curl -fsS -X PATCH \
                 -H "Authorization: Bearer ${GH_TOKEN}" \
