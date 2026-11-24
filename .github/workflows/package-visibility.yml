@@ -1,0 +1,23 @@
+name: Package Visibility
+
+# One-off helper: switches the container package to public so hosts can pull the
+# image without storing a registry token. Manual dispatch only.
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  publish-package:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: make public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+          gh api -X PATCH "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${name}" \
+            -f visibility=public --jq '{name, visibility}'
