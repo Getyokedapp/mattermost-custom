@@ -343,32 +343,18 @@ jobs:
           set -euo pipefail
           tag="${TAG}"
           sha="$(git rev-parse HEAD)"
-          api="${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/git"
 
           # Refs are created through the API, not git push: GITHUB_TOKEN is refused when
           # a pushed commit changes .github/workflows/*, and every upstream release does.
           # The API only moves a pointer to a commit that already exists, so it is allowed.
           put_ref() {
-            local ref="$1" short="$2" code
-            code="$(curl -sS -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H 'Accept: application/vnd.github+json' \
-              "${api}/ref/${short}")"
-            if [ "${code}" = "200" ]; then
-              curl -fsS -X PATCH \
-                -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H 'Accept: application/vnd.github+json' \
-                "${api}/refs/${short}" \
-                -d "{\"sha\":\"${sha}\",\"force\":true}" >/dev/null
-            elif [ "${code}" = "404" ]; then
-              curl -fsS -X POST \
-                -H "Authorization: Bearer ${GH_TOKEN}" \
-                -H 'Accept: application/vnd.github+json' \
-                "${api}/refs" \
-                -d "{\"ref\":\"${ref}\",\"sha\":\"${sha}\"}" >/dev/null
+            local ref="$1" short="$2"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/${short}" >/dev/null 2>&1; then
+              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/${short}" \
+                -f sha="${sha}" -F force=true >/dev/null
             else
-              echo "::error::cannot read ${ref} (HTTP ${code})"
-              return 1
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+                -f ref="${ref}" -f sha="${sha}" >/dev/null
             fi
             echo "published ${ref} -> ${sha}"
           }
