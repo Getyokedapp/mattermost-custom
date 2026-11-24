@@ -1,0 +1,21 @@
+# Host compose for the production Mattermost stack.
+#
+# Lives at /srv/mattermost/docker-compose.yml, next to its .env (mode 600) and the
+# config/data/logs/plugins volumes. MM_IMAGE is what pull-edge.sh rewrites when it
+# deploys a new build; everything else is configuration that belongs to the host.
+services:
+  mattermost:
+    image: ${MM_IMAGE:-ghcr.io/getyokedapp/mattermost-custom:edge}
+    container_name: mattermost
+    restart: unless-stopped
+    ports:
+      # Bound to loopback: Caddy terminates TLS and proxies to this port.
+      - "127.0.0.1:8065:8065"
+    env_file:
+      - .env
+    volumes:
+      - ./config:/mattermost/config
+      - ./data:/mattermost/data
+      - ./logs:/mattermost/logs
+      - ./plugins:/mattermost/plugins
+      - ./client-plugins:/mattermost/client/plugins

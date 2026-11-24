@@ -10,7 +10,8 @@
 #   ./pull-edge.sh --dry-run
 set -euo pipefail
 
-IMAGE="${IMAGE:-ghcr.io/getyokedapp/mattermost-custom:edge}"
+IMAGE="${IMAGE:-registry.getyokedapp.com/getyokedapp/mattermost-custom:edge}"
+REGISTRY_HOST="${IMAGE%%/*}"
 COMPOSE_DIR="${COMPOSE_DIR:-/srv/mattermost}"
 SERVICE="${SERVICE:-mattermost}"
 CONTAINER="${CONTAINER:-mattermost}"
@@ -29,21 +30,25 @@ cd "$COMPOSE_DIR"
 
 prev_id="$(docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
 
-# ghcr.io keeps packages private by default. A token in this file is used when present
-# (a PAT with read:packages, written by an operator); without it the pull works only if
-# the package has been made public.
-if [ -f "${GHCR_TOKEN_FILE:-/etc/mm-ghcr-token}" ]; then
-	docker login ghcr.io -u "${GHCR_USER:-getyokedapp}" \
-		--password-stdin <"${GHCR_TOKEN_FILE:-/etc/mm-ghcr-token}" >/dev/null 2>&1 ||
-		log "warning: ghcr login failed, trying an anonymous pull"
+# The internal registry is private. Prefer the pull-only credential injected into
+# the unit environment (REGISTRY_USERNAME/REGISTRY_PASSWORD); fall back to a token
+# file written by an operator. Without either, the pull is unauthorized.
+if [ -n "${REGISTRY_PASSWORD:-}" ]; then
+	printf '%s' "$REGISTRY_PASSWORD" |
+		docker login "$REGISTRY_HOST" -u "${REGISTRY_USERNAME:?REGISTRY_USERNAME is required with REGISTRY_PASSWORD}" \
+			--password-stdin >/dev/null 2>&1 || log "warning: registry login failed"
+elif [ -f "${REGISTRY_TOKEN_FILE:-/etc/mm-registry-token}" ]; then
+	docker login "$REGISTRY_HOST" -u "${REGISTRY_USER:-getyokedapp}" \
+		--password-stdin <"${REGISTRY_TOKEN_FILE:-/etc/mm-registry-token}" >/dev/null 2>&1 ||
+		log "warning: registry login failed"
 fi
 
 if ! pull_out="$(docker pull -q "$IMAGE" 2>&1)"; then
 	case "$pull_out" in
 	*unauthorized* | *"denied"* | *"authentication required"*)
-		# Not an error worth a red timer every ten minutes: the deployment simply
-		# cannot pull until the package is public or a token is installed.
-		log "SKIP ${IMAGE} is not pullable anonymously (set a token in /etc/mm-ghcr-token or make the package public)"
+		# Keep the timer quiet: a bad or missing credential should be visible in the
+		# log, not produce a failed unit every ten minutes.
+		log "SKIP ${IMAGE} is not pullable (set REGISTRY_USERNAME/REGISTRY_PASSWORD or /etc/mm-registry-token)"
 		exit 0
 		;;
 	esac
