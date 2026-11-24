@@ -29,8 +29,25 @@ cd "$COMPOSE_DIR"
 
 prev_id="$(docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
 
-if ! docker pull -q "$IMAGE" >/dev/null 2>&1; then
-	log "FAIL could not pull ${IMAGE} (not logged in to ghcr, or the tag is gone)"
+# ghcr.io keeps packages private by default. A token in this file is used when present
+# (a PAT with read:packages, written by an operator); without it the pull works only if
+# the package has been made public.
+if [ -f "${GHCR_TOKEN_FILE:-/etc/mm-ghcr-token}" ]; then
+	docker login ghcr.io -u "${GHCR_USER:-getyokedapp}" \
+		--password-stdin <"${GHCR_TOKEN_FILE:-/etc/mm-ghcr-token}" >/dev/null 2>&1 ||
+		log "warning: ghcr login failed, trying an anonymous pull"
+fi
+
+if ! pull_out="$(docker pull -q "$IMAGE" 2>&1)"; then
+	case "$pull_out" in
+	*unauthorized* | *"denied"* | *"authentication required"*)
+		# Not an error worth a red timer every ten minutes: the deployment simply
+		# cannot pull until the package is public or a token is installed.
+		log "SKIP ${IMAGE} is not pullable anonymously (set a token in /etc/mm-ghcr-token or make the package public)"
+		exit 0
+		;;
+	esac
+	log "FAIL pull failed: $(printf '%s' "$pull_out" | tail -1)"
 	exit 1
 fi
 new_id="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
