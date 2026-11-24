@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily check for out-of-band Mattermost plugin releases
+
+[Timer]
+OnCalendar=*-*-* 04:17:00 UTC
+RandomizedDelaySec=20min
+Persistent=true
+Unit=mattermost-plugins.service
+
+[Install]
+WantedBy=timers.target

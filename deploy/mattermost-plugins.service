@@ -1,0 +1,14 @@
+[Unit]
+Description=Install or upgrade out-of-band Mattermost plugins
+Documentation=https://github.com/hongkongkiwi/mattermost/blob/master/deploy/README.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/mattermost/deploy
+ExecStart=/srv/mattermost/deploy/update-plugins.sh
+TimeoutStartSec=15min
+# A failed download must not retry-storm the GitHub API; the next timer tick
+# will pick the release up again.
+Restart=no

@@ -1,0 +1,16 @@
+# Plugins this deployment installs from GitHub releases and keeps updated.
+#
+# Columns, tab separated:
+#   plugin_id   manifest id reported by `mmctl plugin list`
+#   repo        GitHub repository that publishes the release
+#   asset       ripgrep-style regex matched against release asset names
+#   prerelease  "1" to follow prereleases, "0" for final releases only
+#
+# Plugins that ship inside the server tarball (calls, playbooks, agents, github)
+# are NOT listed here: they arrive with the image and must match the server
+# version. Only out-of-band plugins belong in this file.
+freemium	dy0gu/mattermost-plugin-freemium	^freemium\.tar\.gz$	0
+mattermost-autolink	mattermost-community/mattermost-plugin-autolink	\.tar\.gz$	0
+com.mattermost.plugin-todo	mattermost-community/mattermost-plugin-todo	\.tar\.gz$	0
+com.mattermost.custom-attributes	mattermost-community/mattermost-plugin-custom-attributes	\.tar\.gz$	0
+focalboard	mattermost/mattermost-plugin-boards	(^|-)linux-amd64\.tar\.gz$	0
