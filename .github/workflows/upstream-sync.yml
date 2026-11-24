@@ -335,12 +335,45 @@ jobs:
 
       - name: sync/publish-release-branch
         if: (steps.build.outcome == 'success' || steps.rebuild.outcome == 'success') && steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          tag='${{ steps.tag.outputs.tag }}'
-          git push --force origin "release/${tag}"
-          git tag --force "mm-${tag}"
-          git push --force origin "refs/tags/mm-${tag}"
+          tag="${TAG}"
+          sha="$(git rev-parse HEAD)"
+          api="${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/git"
+
+          # Refs are created through the API, not git push: GITHUB_TOKEN is refused when
+          # a pushed commit changes .github/workflows/*, and every upstream release does.
+          # The API only moves a pointer to a commit that already exists, so it is allowed.
+          put_ref() {
+            local ref="$1" short="$2" code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "${api}/ref/${short}") "
+            if [ "${code}" = "200" ]; then
+              curl -fsS -X PATCH \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.github+json' \
+                "${api}/refs/${short}" \
+                -d "{\"sha\":\"${sha}\",\"force\":true}" >/dev/null
+            elif [ "${code}" = "404" ]; then
+              curl -fsS -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.github+json' \
+                "${api}/refs" \
+                -d "{\"ref\":\"${ref}\",\"sha\":\"${sha}\"}" >/dev/null
+            else
+              echo "::error::cannot read ${ref} (HTTP ${code})"
+              return 1
+            fi
+            echo "published ${ref} -> ${sha}"
+          }
+
+          put_ref "refs/heads/release/${tag}" "heads/release/${tag}"
+          put_ref "refs/tags/mm-${tag}" "tags/mm-${tag}"
 
       - name: sync/report-failure
         if: failure()
@@ -359,4 +392,7 @@ jobs:
           fi
 
           body=$(printf 'The automatic sync of upstream %s did not finish.\n\nRun: %s\n\nCheck the run log. If the patched tree does not build, push a fixed release/%s branch, or re-run once the Cloudflare AI Gateway repair step is configured.\n' "${tag}" "${run_url}" "${tag}")
-          gh issue create --title "${title}" --body "${body}"
+          # Reporting is best effort: a token that cannot open issues must not replace the
+          # real failure with a confusing one.
+          gh issue create --title "${title}" --body "${body}" ||
+            echo "::warning::could not open the tracking issue (issues disabled or token lacks issues: write)"
