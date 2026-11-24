@@ -10,9 +10,11 @@ Three pieces move independently, so each one has its own trigger:
 
 ## Server image
 
-`custom-image.yml` publishes `ghcr.io/getyokedapp/mattermost-custom` — `:edge` plus
-`:mm-<tag>-<sha>` — from the newest final upstream tag plus `patches/` as they are on
-master. `pull-edge.sh` pulls `IMAGE`, compares image ids, and only recreates the
+`custom-image.yml` publishes `registry.getyokedapp.com/getyokedapp/mattermost-custom` —
+`:edge` plus `:mm-<tag>-<sha>` — from the newest final upstream tag plus `patches/` as
+they are on master, keeping the six newest `mm-` tags. The existing
+`ghcr.io/getyokedapp/mattermost-custom` package is no longer written to; it stays as
+the fallback the host currently pulls from. `pull-edge.sh` pulls `IMAGE`, compares image ids, and only recreates the
 container when the image changed; if the new container does not report healthy within
 `HEALTH_TIMEOUT` (180s) it is rolled back to the image that was running before, tagged
 `mattermost:rollback`.
@@ -33,8 +35,19 @@ Environment=REGISTRY_USERNAME=getyokedapp
 EnvironmentFile=/etc/mm-registry.env   # REGISTRY_PASSWORD=...
 ```
 
-`registry.getyokedapp.com` is not deployed yet: the name does not resolve and no
-infrastructure for it exists in the repository, so ghcr is the live publisher.
+The internal registry's Terraform (bucket, deploy token, Phase credentials) lives in
+`terraform-infra/infrastructure/cloudflare_internal_registry.tf`, and the Worker
+itself deploys from `internal-registry/.github/workflows/deploy.yml`. Until the first
+registry-published `:edge` has been pulled successfully on the host, leave `IMAGE` at
+the ghcr default. After that, install the drop-in above with the read-only pair:
+
+```ini
+Environment=REGISTRY_USERNAME=registry-ro
+Environment=REGISTRY_PASSWORD=<REGISTRY_READONLY_PASSWORD from Phase>
+```
+
+Then set `IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:edge` in the
+same drop-in so a registry outage is a one-line revert.
 
 ## Host configuration
 

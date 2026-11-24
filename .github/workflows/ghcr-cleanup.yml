@@ -1,0 +1,34 @@
+name: Prune GHCR image versions
+
+# Transitional: images now publish to registry.getyokedapp.com, but old
+# ghcr.io/getyokedapp/mattermost-custom versions still bill against the package
+# quota. Keeps the newest N and never deletes :edge. Run after the first
+# registry-published :edge has been verified on the host.
+
+on:
+  schedule:
+    - cron: "17 4 1 * *"
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: Number of newest versions to keep
+        required: true
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: mattermost-custom
+          package-type: container
+          min-versions-to-keep: ${{ inputs.keep || 3 }}
+          ignore-versions: "^edge$"
+          token: ${{ secrets.GITHUB_TOKEN }}
