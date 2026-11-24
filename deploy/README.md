@@ -21,6 +21,10 @@ IMAGE=ghcr.io/getyokedapp/mattermost-custom:edge ./pull-edge.sh --dry-run
 journalctl -u mattermost-edge.service -n 40
 ```
 
+ghcr packages are private by default, so `/etc/mm-ghcr-token` holds a token with
+`read:packages` (0600) and `pull-edge.sh` logs in with it; the unit sets
+`GHCR_USER` to the token owner. Making the package public removes the need for it.
+
 The compose file reads `MM_IMAGE`, so a manual deploy of a specific build is:
 
 ```sh
