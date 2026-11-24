@@ -62,8 +62,11 @@ api_get() {
 updated=0
 failed=0
 
-while IFS=$'\t' read -r id repo asset prerelease; do
+while IFS=$'\t' read -r id repo asset prerelease enabled; do
 	case "$id" in '' | '#'*) continue ;; esac
+	# Column 5 is optional: "0" installs the plugin but leaves it disabled, for
+	# plugins that cannot activate until they are configured (OAuth keys, and so on).
+	enabled="${enabled:-1}"
 	[ -n "${asset:-}" ] || { log "SKIP ${id}: no asset regex"; continue; }
 
 	release_url="https://api.github.com/repos/${repo}/releases/latest"
@@ -105,9 +108,13 @@ while IFS=$'\t' read -r id repo asset prerelease; do
 	fi
 
 	if out="$(docker exec "$CONTAINER" "$MMCTL" --local plugin add "$inside" 2>&1)"; then
-		# Keep the plugin enabled if it was enabled before the upgrade.
-		docker exec "$CONTAINER" "$MMCTL" --local plugin enable "$id" >/dev/null 2>&1 || true
-		log "DONE ${id} -> ${want}"
+		if [ "$enabled" = "0" ]; then
+			docker exec "$CONTAINER" "$MMCTL" --local plugin disable "$id" >/dev/null 2>&1 || true
+			log "DONE ${id} -> ${want} (installed, disabled until configured)"
+		else
+			docker exec "$CONTAINER" "$MMCTL" --local plugin enable "$id" >/dev/null 2>&1 || true
+			log "DONE ${id} -> ${want}"
+		fi
 		updated=$((updated + 1))
 	else
 		log "FAIL ${id}: $(printf '%s' "$out" | tail -1)"

@@ -55,6 +55,9 @@ Managed by the manifest:
 | `render-md` | jaschadub/mattermost-render-md-plugin | `.md` attachments open rendered; **webapp-only** |
 | `com.github.adriadam10.read-receipts` | adriadam10/mattermost-plugin-read-receipts | WhatsApp-style ticks + message info; server part |
 | `forward-anywhere` | SadeqRouhani/mattermost-forward-anywhere | forward a post to any channel/DM, replacing built-in Forward |
+| `com.mattermost.google-meet` | mattermost/mattermost-plugin-google-meet | Meet links in channels; needs a Google OAuth app |
+| `com.mattermost-community.plugin-google-drive` | mattermost/mattermost-plugin-google-drive | Drive file search/share; needs a Google OAuth app |
+| `com.mattermost.gcal` | mattermost/mattermost-plugin-google-calendar | **installed but disabled** (`enabled=0` in the manifest): it refuses to activate without OAuth2 credentials and retries loudly, so it stays off until they are set |
 
 From the release tarball, upgraded with the server: `com.mattermost.calls`,
 `mattermost-ai` (Agents), `github`, `playbooks` (needs a licence, left disabled).
@@ -64,12 +67,11 @@ From the release tarball, upgraded with the server: `com.mattermost.calls`,
 | Plugin | Why not |
 | --- | --- |
 | jitsi | needs a Jitsi Meet deployment to point at; Calls already covers meetings |
-| google-calendar, google-meet | need a Google Workspace OAuth client and admin consent |
 | giphy | needs a GIPHY API key; without it the plugin has nothing to call |
 | alertmanager | needs a Prometheus Alertmanager endpoint we do not run |
 | autotranslate | needs a translation provider key (DeepL/Google/Azure/LibreTranslate) |
 | oidc (server-camp) | redundant: OIDC is already in the server via `patches/oidc-sso.patch`, and a second login path is a second way to get locked out |
-| google-drive, zoom, google-meet | need Google/Zoom OAuth apps and admin consent |
+| zoom | needs a Zoom OAuth app; no Zoom account in use |
 | gif-favorites, avatar-gif, text-fx | novelty cosmetics; no work-chat value, widest surface for least gain |
 | request-hub | **no licence file**, so there is no permission to run it |
 | secrets, urlsearch, stakeholder-questions | no releases published, so nothing to install or auto-update; `secrets` also needs a Vault/OpenBao backend |

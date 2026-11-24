@@ -5,6 +5,8 @@
 #   repo        GitHub repository that publishes the release
 #   asset       ripgrep-style regex matched against release asset names
 #   prerelease  "1" to follow prereleases, "0" for final releases only
+#   enabled     optional, "0" installs the plugin but leaves it disabled until it
+#               is configured (plugins that refuse to activate without OAuth keys)
 #
 # Plugins that ship inside the server tarball (calls, playbooks, agents, github)
 # are NOT listed here: they arrive with the image and must match the server
@@ -18,3 +20,6 @@ com.github.adriadam10.mermaid	adriadam10/mattermost-plugin-mermaid	\.tar\.gz$	0
 render-md	jaschadub/mattermost-render-md-plugin	\.tar\.gz$	0
 com.github.adriadam10.read-receipts	adriadam10/mattermost-plugin-read-receipts	\.tar\.gz$	0
 forward-anywhere	SadeqRouhani/mattermost-forward-anywhere	\.tar\.gz$	0
+com.mattermost.gcal	mattermost/mattermost-plugin-google-calendar	-linux-amd64\.tar\.gz$	0	0
+com.mattermost.google-meet	mattermost/mattermost-plugin-google-meet	-linux-amd64\.tar\.gz$	0
+com.mattermost-community.plugin-google-drive	mattermost/mattermost-plugin-google-drive	-linux-amd64\.tar\.gz$	0
