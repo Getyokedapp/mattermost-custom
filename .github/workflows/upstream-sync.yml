@@ -5,7 +5,7 @@ name: Upstream Release Sync
 #
 #   master          mirror of upstream; only ever merged forward, never patched,
 #                   so the next upstream release keeps merging cleanly
-#   release/<tag>   <tag> + patches/ + the OIDC patch from toowoxx/mattermost-oidc
+#   release/<tag>   <tag> + every patch in patches/
 #   mm-<tag>        tag on the patched release commit
 #
 # A green build also publishes the runnable image
@@ -53,7 +53,6 @@ concurrency:
 
 env:
   UPSTREAM_REPO: mattermost/mattermost
-  OIDC_REPO_URL: https://github.com/toowoxx/mattermost-oidc.git
 
 jobs:
   sync:
@@ -144,31 +143,16 @@ jobs:
           git checkout master -- patches
 
           status=0
-          if ! git apply -v "$RUNNER_TEMP/patches/limits-no-cap.patch"; then
-            echo "::warning::patches/limits-no-cap.patch does not apply to ${tag}"
-            status=1
-          fi
-
-          if [ ! -d ../mattermost-oidc ]; then
-            # go.mod replaces github.com/toowoxx/mattermost-oidc with
-            # ../../mattermost-oidc relative to server/, so this must be a sibling
-            # of the checkout.
-            git clone --depth 1 "${OIDC_REPO_URL}" ../mattermost-oidc
-          fi
-          oidc_patch="../mattermost-oidc/patches/mattermost-${tag}.patch"
-          if [ -f "${oidc_patch}" ]; then
-            if ! git apply -v "${oidc_patch}"; then
-              echo "::warning::OIDC patch for ${tag} does not apply"
+          for patch in "$RUNNER_TEMP"/patches/*.patch; do
+            if ! git apply -v "${patch}"; then
+              echo "::warning::patches/$(basename "${patch}") does not apply to ${tag}"
               status=1
             fi
-          else
-            echo "::warning::toowoxx/mattermost-oidc publishes no patch for ${tag}"
-            status=1
-          fi
+          done
 
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Apply OIDC SSO and no-cap patches on ${tag}"
+            git commit -m "Apply patches on ${tag}"
           fi
 
           echo "needs_repair=${status}" >> "$GITHUB_OUTPUT"
@@ -227,7 +211,7 @@ jobs:
             stopped applying or the patched tree no longer compiles, so the patches have to be
             repaired against the new upstream code. Do not revert the behaviour they add.
 
-            Two patches must end up applied to the working tree:
+            Every patch in patches/ must end up applied to the working tree:
 
             1. patches/limits-no-cap.patch
                - server/channels/app/limits.go: maxUsersLimit/maxUsersHardLimit raised so the
@@ -239,18 +223,25 @@ jobs:
                Intent: a self-hosted server never truncates message history and never caps seats,
                even when an Entry licence is installed.
 
-            2. The OIDC patch from toowoxx/mattermost-oidc for ${{ steps.tag.outputs.tag }}
-               (../mattermost-oidc/patches/mattermost-${{ steps.tag.outputs.tag }}.patch when it
-               exists). It adds the go.mod require/replace for the module, the blank openid
-               import in server/cmd/mattermost/main.go, drops the email-account guard in
-               server/channels/app/user.go, and stops the licence gate from hiding
-               EnableSignUpWithOpenId/OpenIdButtonText/OpenIdButtonColor in server/config/client.go.
-               If that project has no patch for this release yet, port the newest patch in
-               ../mattermost-oidc/patches/ forward to this tree.
+            2. patches/oidc-sso.patch
+               - server/channels/app/oauthproviders/oidc/: generic OIDC SSO provider that
+                 registers itself for model.ServiceOpenid (vendored from
+                 github.com/toowoxx/mattermost-oidc, AGPL, headers kept). It resolves the
+                 authorize/token/userinfo endpoints from OpenIdSettings.DiscoveryEndpoint,
+                 uses the sub claim as AuthData, and only requires sub + email claims.
+               - server/cmd/mattermost/main.go: blank import of that package.
+               - server/channels/app/user.go: an existing email account is linked to SSO
+                 instead of rejected with already_attached.
+               - server/config/client.go: the limited (unlicensed) client config exposes
+                 EnableSignUpWithOpenId/OpenIdButtonText/OpenIdButtonColor.
+               Intent: generic OIDC login (Cloudflare Access, Entra ID, Keycloak) works on an
+               unlicensed self-hosted server.
+               Do not reintroduce a go.mod require/replace for the provider; it is vendored
+               in the tree on purpose so the build needs no sibling checkout.
 
             Rules:
             - Keep the changes minimal and in the same places the patches already touch.
-            - Rewrite patches/limits-no-cap.patch so it applies to a pristine
+            - Rewrite patches/*.patch so each applies to a pristine
               ${{ steps.tag.outputs.tag }} checkout again (`git apply --check` must pass).
             - Do not push, do not open a pull request, do not commit, and do not touch
               .github/workflows. Leave the result in the working tree; the workflow commits it.
