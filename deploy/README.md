@@ -10,16 +10,31 @@ Three pieces move independently, so each one has its own trigger:
 
 ## Server image
 
-`custom-image.yml` publishes `registry.getyokedapp.com/getyokedapp/mattermost-custom:edge`
-from the newest final upstream tag plus `patches/` as they are on master. `pull-edge.sh`
-pulls that tag, compares image ids, and only recreates the container when the image
-changed; if the new container does not report healthy within 180s it is rolled back
-to the image that was running before (`mattermost:rollback`).
+`custom-image.yml` publishes `ghcr.io/getyokedapp/mattermost-custom` — `:edge` plus
+`:mm-<tag>-<sha>` — from the newest final upstream tag plus `patches/` as they are on
+master. `pull-edge.sh` pulls `IMAGE`, compares image ids, and only recreates the
+container when the image changed; if the new container does not report healthy within
+`HEALTH_TIMEOUT` (180s) it is rolled back to the image that was running before, tagged
+`mattermost:rollback`.
 
 ```sh
-IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:edge ./pull-edge.sh --dry-run
+./pull-edge.sh --dry-run
 journalctl -u mattermost-edge.service -n 40
 ```
+
+`IMAGE` defaults to the ghcr `:edge` tag. Point the timer at a different registry
+without editing the script:
+
+```sh
+# /etc/systemd/system/mattermost-edge.service.d/registry.conf
+[Service]
+Environment=IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:edge
+Environment=REGISTRY_USERNAME=getyokedapp
+EnvironmentFile=/etc/mm-registry.env   # REGISTRY_PASSWORD=...
+```
+
+`registry.getyokedapp.com` is not deployed yet: the name does not resolve and no
+infrastructure for it exists in the repository, so ghcr is the live publisher.
 
 ## Host configuration
 
@@ -29,27 +44,17 @@ compose file there, write `.env` from the example (mode 600, only the database U
 needs filling in), then `docker compose up -d`. Install the four units with
 `copy deploy/*.service deploy/*.timer /etc/systemd/system/` and enable both timers.
 
-ghcr packages are private by default, so `/etc/mm-ghcr-token` holds a token with
-`read:packages` (0600) and `pull-edge.sh` logs in with it; the unit sets
-`GHCR_USER` to the token owner. Making the package public removes the need for it.
+The package is private, so `pull-edge.sh` logs in before pulling. It uses
+`REGISTRY_USERNAME`/`REGISTRY_PASSWORD` when the unit provides them, otherwise a token
+file — `/etc/mm-registry-token`, or `/etc/mm-ghcr-token` (mode 600, currently present,
+`GHCR_USER` in the unit names the token owner). Login is skipped entirely when `IMAGE`
+has no registry host. Making the package public removes the need for the file.
 
 The compose file reads `MM_IMAGE`, so a manual deploy of a specific build is:
 
 ```sh
-sed -i 's|^MM_IMAGE=.*|MM_IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:mm-v12.1.0-abc1234|' /srv/mattermost/.env
+sed -i 's|^MM_IMAGE=.*|MM_IMAGE=ghcr.io/getyokedapp/mattermost-custom:mm-v12.1.0-abc1234|' /srv/mattermost/.env
 docker compose -f /srv/mattermost/docker-compose.yml up -d
-```
-
-The registry is private. `pull-edge.sh` logs in with
-`REGISTRY_USERNAME`/`REGISTRY_PASSWORD` from the unit environment, or with a
-token file at `/etc/mm-registry-token` if those are unset. Use the pull-only
-credential, not the CI write credential:
-
-```sh
-# /etc/systemd/system/mattermost-edge.service.d/registry.conf
-[Service]
-Environment=REGISTRY_USERNAME=getyokedapp
-EnvironmentFile=/etc/mm-registry.env   # REGISTRY_PASSWORD=...
 ```
 
 # Plugin deployment
