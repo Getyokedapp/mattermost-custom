@@ -63,6 +63,9 @@ jobs:
       contents: write
       issues: write
       packages: write
+      # Merging upstream master touches .github/workflows/*, which GitHub refuses to
+      # push without this even though contents is writable.
+      workflows: write
     steps:
       - name: sync/checkout-master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
