@@ -1,0 +1,114 @@
+name: Custom Image
+
+# Builds the patched server from the *latest upstream release* plus whatever
+# patches/ and deploy/ hold on master, whenever either changes. The release sync
+# only runs when upstream cuts a tag; this covers the other direction, where we
+# change a patch or a deployed file and want an image without waiting for upstream.
+#
+# Publishes :edge (what the host watches) and :mm-<tag>-<sha> for pinning.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'patches/**'
+      - 'server/**'
+      - 'deploy/**'
+      - '.github/workflows/custom-image.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: custom-image
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: mattermost/mattermost
+
+jobs:
+  image:
+    name: Build patched image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: image/checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: image/resolve-upstream-tag
+        id: tag
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
+          git fetch --no-tags upstream 'refs/tags/v*:refs/tags/v*'
+          tag="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          [ -n "$tag" ] || { echo "::error::no final upstream tag found"; exit 1; }
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "building ${tag}"
+
+      - name: image/apply-patches
+        run: |
+          set -euo pipefail
+          tag='${{ steps.tag.outputs.tag }}'
+          mkdir -p "$RUNNER_TEMP/patches"
+          cp patches/*.patch "$RUNNER_TEMP/patches/"
+          git switch --detach "refs/tags/${tag}"
+          for patch in "$RUNNER_TEMP"/patches/*.patch; do
+            git apply -v "${patch}"
+          done
+
+      - name: image/setup-go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: server/.go-version
+          cache-dependency-path: server/go.sum
+
+      - name: image/build
+        env:
+          GOPRIVATE: github.com/mattermost/*
+        run: |
+          cd server
+          make build-linux-amd64
+
+      - name: image/publish
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          repo_name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/${repo_name}"
+          short="$(git rev-parse --short HEAD)"
+
+          docker build \
+            --build-arg "MM_PACKAGE=https://releases.mattermost.com/${version}/mattermost-enterprise-${version}-linux-amd64.tar.gz" \
+            -t "${image}:base-${TAG}" \
+            --file server/build/Dockerfile server/build
+
+          binary="$(find server/bin -type f -name mattermost -print -quit)"
+          [ -n "$binary" ] || { echo "::error::patched binary not found"; exit 1; }
+
+          ctx="$(mktemp -d)"
+          install -D -m 0755 "$binary" "${ctx}/bin/mattermost"
+          printf 'FROM %s:base-%s\nCOPY --chown=2000:2000 bin/mattermost /mattermost/bin/mattermost\n' \
+            "$image" "$TAG" > "${ctx}/Dockerfile"
+
+          docker build \
+            -t "${image}:edge" \
+            -t "${image}:mm-${TAG}-${short}" \
+            --file "${ctx}/Dockerfile" "$ctx"
+
+          docker run --rm --entrypoint /mattermost/bin/mattermost "${image}:edge" version
+
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "${image}:edge"
+          docker push "${image}:mm-${TAG}-${short}"
+          echo "pushed ${image}:edge and ${image}:mm-${TAG}-${short}"

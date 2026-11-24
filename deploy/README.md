@@ -1,3 +1,33 @@
+# Deployment
+
+Three pieces move independently, so each one has its own trigger:
+
+| Piece | Built by | Installed by |
+| --- | --- | --- |
+| server binary + image | `upstream-sync.yml` on a new upstream tag, `custom-image.yml` on a push that touches `patches/`, `server/` or `deploy/` | `pull-edge.sh` on a 10 minute timer |
+| plugins | their own GitHub releases | `update-plugins.sh` on a daily timer |
+| config | `.env` and `compose` on the host | `docker compose up -d` |
+
+## Server image
+
+`custom-image.yml` publishes `ghcr.io/getyokedapp/mattermost-custom:edge` from the
+newest final upstream tag plus `patches/` as they are on master. `pull-edge.sh`
+pulls that tag, compares image ids, and only recreates the container when the image
+changed; if the new container does not report healthy within 180s it is rolled back
+to the image that was running before (`mattermost:rollback`).
+
+```sh
+IMAGE=ghcr.io/getyokedapp/mattermost-custom:edge ./pull-edge.sh --dry-run
+journalctl -u mattermost-edge.service -n 40
+```
+
+The compose file reads `MM_IMAGE`, so a manual deploy of a specific build is:
+
+```sh
+sed -i 's|^MM_IMAGE=.*|MM_IMAGE=ghcr.io/getyokedapp/mattermost-custom:mm-v12.1.0-abc1234|' /srv/mattermost/.env
+docker compose -f /srv/mattermost/docker-compose.yml up -d
+```
+
 # Plugin deployment
 
 The server image carries only the plugins published with the Mattermost release

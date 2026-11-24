@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch the published Mattermost edge image
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1min
+Persistent=true
+Unit=mattermost-edge.service
+
+[Install]
+WantedBy=timers.target
