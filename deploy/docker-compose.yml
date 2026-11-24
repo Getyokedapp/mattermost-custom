@@ -12,7 +12,11 @@ services:
       # Bound to loopback: Caddy terminates TLS and proxies to this port.
       - "127.0.0.1:8065:8065"
     env_file:
+      # .env holds host-owned configuration; .env.phase is rendered from Phase
+      # by phase-env@mattermost and is absent on a host without a Phase token.
       - .env
+      - path: .env.phase
+        required: false
     volumes:
       - ./config:/mattermost/config
       - ./data:/mattermost/data

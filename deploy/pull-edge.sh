@@ -99,6 +99,14 @@ else
 	printf 'MM_IMAGE=%s\n' "$IMAGE" >>.env
 fi
 
+# Refresh Phase-backed secrets before the container is recreated. A host with
+# no Phase token keeps whatever .env.phase it already has (or none at all),
+# so a failed render is a warning, not a failed deploy.
+if [ -x /usr/local/sbin/phase-env-render ]; then
+	/usr/local/sbin/phase-env-render mattermost ||
+		log "warning: Phase render failed; deploying with the existing env"
+fi
+
 log "deploying ${IMAGE} (${new_id:0:19})"
 docker compose up -d --no-deps "$SERVICE" >/dev/null 2>&1 || {
 	log "FAIL compose up failed"
