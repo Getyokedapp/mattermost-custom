@@ -51,6 +51,10 @@ Managed by the manifest:
 | `com.mattermost.plugin-todo` | mattermost-community/mattermost-plugin-todo | turn a post into a trackable todo |
 | `com.mattermost.custom-attributes` | mattermost-community/mattermost-plugin-custom-attributes | per-user custom profile fields |
 | `focalboard` | mattermost/mattermost-plugin-boards | boards/cards, no licence needed on this build |
+| `com.github.adriadam10.mermaid` | adriadam10/mattermost-plugin-mermaid | renders ```mermaid blocks; **webapp-only**, no server binary |
+| `render-md` | jaschadub/mattermost-render-md-plugin | `.md` attachments open rendered; **webapp-only** |
+| `com.github.adriadam10.read-receipts` | adriadam10/mattermost-plugin-read-receipts | WhatsApp-style ticks + message info; server part |
+| `forward-anywhere` | SadeqRouhani/mattermost-forward-anywhere | forward a post to any channel/DM, replacing built-in Forward |
 
 From the release tarball, upgraded with the server: `com.mattermost.calls`,
 `mattermost-ai` (Agents), `github`, `playbooks` (needs a licence, left disabled).
@@ -65,3 +69,11 @@ From the release tarball, upgraded with the server: `com.mattermost.calls`,
 | alertmanager | needs a Prometheus Alertmanager endpoint we do not run |
 | autotranslate | needs a translation provider key (DeepL/Google/Azure/LibreTranslate) |
 | oidc (server-camp) | redundant: OIDC is already in the server via `patches/oidc-sso.patch`, and a second login path is a second way to get locked out |
+| google-drive, zoom, google-meet | need Google/Zoom OAuth apps and admin consent |
+| gif-favorites, avatar-gif, text-fx | novelty cosmetics; no work-chat value, widest surface for least gain |
+| request-hub | **no licence file**, so there is no permission to run it |
+| secrets, urlsearch, stakeholder-questions | no releases published, so nothing to install or auto-update; `secrets` also needs a Vault/OpenBao backend |
+| campfire | full standup/task/leave suite: a product, not a plugin. Needs its own setup and has no track record yet |
+| bot-webhook | routes bot DMs to an HTTP endpoint; our Hermes bridge already consumes bot messages over the websocket |
+| hermes-plugin-mattermost-enhancer | a **Hermes** plugin, not a Mattermost one — configure it in Hermes, not on the server |
+| read-receipts by Morraycage / ghaffaria | duplicate implementations of the same feature; the adriadam10 fork above is the one kept |
