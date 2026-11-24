@@ -63,9 +63,6 @@ jobs:
       contents: write
       issues: write
       packages: write
-      # Merging upstream master touches .github/workflows/*, which GitHub refuses to
-      # push without this even though contents is writable.
-      workflows: write
     steps:
       - name: sync/checkout-master
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -135,7 +132,18 @@ jobs:
           git fetch --force --no-tags upstream 'refs/heads/master:refs/remotes/upstream/master'
           git switch --force-create master origin/master
           git merge --no-edit -m 'Merge upstream master' refs/remotes/upstream/master
-          git push origin master
+
+          # GITHUB_TOKEN cannot push a commit that modifies .github/workflows/*: GitHub
+          # answers "refusing to allow a GitHub App to create or update workflow" and no
+          # workflow permission scope exists to grant it. Upstream changes its own
+          # workflows constantly, so the mirror is pushed by a human (or a PAT) when that
+          # happens; the release build below does not depend on it. Keep the merge local
+          # and carry on rather than failing the whole run.
+          if git diff --name-only origin/master..HEAD | grep -q '^\.github/workflows/'; then
+            echo "::warning::upstream master changed .github/workflows/*; leaving master for a manual push"
+          else
+            git push origin master
+          fi
 
       - name: sync/apply-patches
         id: patch
