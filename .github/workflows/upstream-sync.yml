@@ -114,6 +114,14 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: sync/git-identity
+        # Every step that commits needs an author, and the merge commit below runs
+        # before any of them would otherwise set one: a runner has no identity and
+        # git refuses to create the merge commit.
+        run: |
+          git config user.name 'upstream-sync[bot]'
+          git config user.email 'upstream-sync@users.noreply.github.com'
+
       - name: sync/update-master
         # master tracks upstream master, not the release tag: release branches are
         # cherry-picked, so merging a tag into master conflicts on hundreds of files.
