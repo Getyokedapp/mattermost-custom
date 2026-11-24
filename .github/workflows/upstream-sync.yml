@@ -342,25 +342,24 @@ jobs:
         run: |
           set -euo pipefail
           tag="${TAG}"
-          sha="$(git rev-parse HEAD)"
 
-          # Refs are created through the API, not git push: GITHUB_TOKEN is refused when
-          # a pushed commit changes .github/workflows/*, and every upstream release does.
-          # The API only moves a pointer to a commit that already exists, so it is allowed.
-          put_ref() {
-            local ref="$1" short="$2"
-            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/${short}" >/dev/null 2>&1; then
-              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/${short}" \
-                -f sha="${sha}" -F force=true >/dev/null
-            else
-              gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-                -f ref="${ref}" -f sha="${sha}" >/dev/null
-            fi
-            echo "published ${ref} -> ${sha}"
-          }
+          # The patched commit was created in this runner and never pushed, so git
+          # push cannot publish it (GITHUB_TOKEN is refused for commits that touch
+          # .github/workflows) and the API cannot point a ref at a commit GitHub has
+          # never seen. The tag therefore marks the master commit whose patches built
+          # this image, not the throwaway release commit; the image itself is the
+          # deliverable and is named mm-<tag>.
+          sha="$(git rev-parse origin/master)"
+          ref="refs/tags/mm-${tag}"
 
-          put_ref "refs/heads/release/${tag}" "heads/release/${tag}"
-          put_ref "refs/tags/mm-${tag}" "tags/mm-${tag}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/mm-${tag}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/mm-${tag}" \
+              -f sha="${sha}" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="${ref}" -f sha="${sha}" >/dev/null
+          fi
+          echo "published ${ref} -> ${sha}"
 
       - name: sync/report-failure
         if: failure()
