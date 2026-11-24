@@ -1,6 +1,6 @@
 name: Prune GHCR image versions
 
-# Transitional: images now publish to registry.getyokedapp.com, but old
+# Transitional: images now publish to registry.internal.getyokedapp.com, but old
 # ghcr.io/getyokedapp/mattermost-custom versions still bill against the package
 # quota. Keeps the newest N and never deletes :edge. Run after the first
 # registry-published :edge has been verified on the host.

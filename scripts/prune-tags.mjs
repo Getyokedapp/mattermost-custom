@@ -10,7 +10,7 @@
  * version/build component (for example mm-v12.1.0-abc1234).
  *
  * Usage:
- *   REGISTRY=registry.getyokedapp.com REGISTRY_USERNAME=ci REGISTRY_PASSWORD=... \
+ *   REGISTRY=registry.internal.getyokedapp.com REGISTRY_USERNAME=ci REGISTRY_PASSWORD=... \
  *   node scripts/prune-tags.mjs --repo getyokedapp/mattermost-custom \
  *     --prefix mm- --keep 6 --apply
  */

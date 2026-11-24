@@ -10,7 +10,7 @@ Three pieces move independently, so each one has its own trigger:
 
 ## Server image
 
-`custom-image.yml` publishes `registry.getyokedapp.com/getyokedapp/mattermost-custom` —
+`custom-image.yml` publishes `registry.internal.getyokedapp.com/getyokedapp/mattermost-custom` —
 `:edge` plus `:mm-<tag>-<sha>` — from the newest final upstream tag plus `patches/` as
 they are on master, keeping the six newest `mm-` tags. The existing
 `ghcr.io/getyokedapp/mattermost-custom` package is no longer written to; it stays as
@@ -30,7 +30,7 @@ without editing the script:
 ```sh
 # /etc/systemd/system/mattermost-edge.service.d/registry.conf
 [Service]
-Environment=IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:edge
+Environment=IMAGE=registry.internal.getyokedapp.com/getyokedapp/mattermost-custom:edge
 Environment=REGISTRY_USERNAME=getyokedapp
 EnvironmentFile=/etc/mm-registry.env   # REGISTRY_PASSWORD=...
 ```
@@ -46,7 +46,7 @@ Environment=REGISTRY_USERNAME=registry-ro
 Environment=REGISTRY_PASSWORD=<REGISTRY_READONLY_PASSWORD from Phase>
 ```
 
-Then set `IMAGE=registry.getyokedapp.com/getyokedapp/mattermost-custom:edge` in the
+Then set `IMAGE=registry.internal.getyokedapp.com/getyokedapp/mattermost-custom:edge` in the
 same drop-in so a registry outage is a one-line revert.
 
 ## Host configuration

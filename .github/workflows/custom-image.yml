@@ -6,7 +6,7 @@ name: Custom Image
 # change a patch or a deployed file and want an image without waiting for upstream.
 #
 # Publishes :edge (what the host watches) and :mm-<tag>-<sha> for pinning to the
-# internal registry at registry.getyokedapp.com.
+# internal registry at registry.internal.getyokedapp.com.
 
 on:
   push:
@@ -79,7 +79,7 @@ jobs:
       - name: image/publish
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-          REGISTRY: registry.getyokedapp.com
+          REGISTRY: registry.internal.getyokedapp.com
           REGISTRY_REPO: getyokedapp/mattermost-custom
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
@@ -128,7 +128,7 @@ jobs:
 
       - name: image/retain
         env:
-          REGISTRY: registry.getyokedapp.com
+          REGISTRY: registry.internal.getyokedapp.com
           REGISTRY_REPO: getyokedapp/mattermost-custom
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}

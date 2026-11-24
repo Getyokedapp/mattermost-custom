@@ -15,7 +15,7 @@
  * use the OCI exporter without a separate containerd-backed builder.
  *
  * Usage:
- *   REGISTRY=registry.getyokedapp.com \
+ *   REGISTRY=registry.internal.getyokedapp.com \
  *   REGISTRY_USERNAME=ci REGISTRY_PASSWORD=... \
  *   node scripts/push-oci.mjs --repo getyokedapp/mattermost-custom \
  *     --tag edge --tag mm-v12.1.0-abc1234 --docker-save image.tar
